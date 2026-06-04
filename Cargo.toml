@@ -1,0 +1,6 @@
+[package]
+name = "ternary-agent"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Core agent types for the ternary ecosystem with avoid/explore/choose states"
