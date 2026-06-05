@@ -84,6 +84,16 @@ Memory decay multiplies long-term entry strengths by a factor and prunes below a
 
 `ternary-agent` is a foundational crate. It depends on nothing outside `std`. Other ternary crates like `ternary-room` (multi-agent environments), `ternary-ensign` (specialist agents), and `ternary-world` (simulation engine) build on top of the types defined here.
 
+## See Also
+
+- **ternary-room** — Room abstraction for multi-agent environments
+- **ternary-cortex** — Cognitive architecture for ternary agents
+- **ternary-fitness** — Fitness landscape analysis for ternary strategies
+- **ternary-memory** — Memory systems for ternary agents
+- **ternary-cell** — Cellular computing with ternary state machines
+- **ternary-popgen** — Population genetics for ternary agents
+- **ternary-bus** — Message bus for inter-agent communication
+
 ## License
 
 MIT
