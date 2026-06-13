@@ -1,97 +1,109 @@
-# ternary-agent
+# Ternary Agent
 
-**Core agent types for the ternary ecosystem**
+**Ternary Agent** provides the core agent types for the ternary ecosystem — every agent operates in one of three states (Avoid = -1, Explore = 0, Choose = +1), carrying memory, fitness scores, and behavioral metadata through an agent pool with fitness-based ranking.
 
-[![ternary](https://img.shields.io/badge/ecosystem-ternary-blue)](https://github.com/orgs/SuperInstance/repositories?q=ternary)
-[![tests](https://img.shields.io/badge/tests-23-green)]()
+## Why It Matters
 
-## Overview
+Agent-based modeling frameworks need a foundational type that every higher-level system can build on. This crate defines that type: `Agent` with a `TernaryState` (Avoid/Explore/Choose), `AgentMemory` (short-term and long-term with decay), `Fitness` scoring, and an `AgentPool` with ranking. These three states map to the fundamental cognitive cycle: explore (gather information), choose (commit to an option), avoid (reject harmful options). This is the balanced ternary digit set {-1, 0, +1} applied to cognitive science.
 
-Core agent types for the ternary ecosystem.
+## How It Works
 
-Every agent operates in one of three states — Avoid, Explore, or Choose —
-borrowed from the ternary digit set {-1, 0, +1}. An `Agent` carries memory,
-fitness, and behavior. An `AgentPool` tracks a collection of agents with
-fitness-based ranking. `AgentCommunication` provides message passing.
+### Ternary State Machine
 
-## Architecture
-
-- **`MemoryEntry`** — core data structure
-- **`AgentMemory`** — core data structure
-- **`ThresholdStrategy`** — core data structure
-- **`AgentBehavior`** — core data structure
-- **`AgentMessage`** — core data structure
-- **`AgentCommunication`** — core data structure
-- **`Agent`** — core data structure
-- **`AgentPool`** — core data structure
-- **`TernaryState`** — state enumeration
-
-### Traits
-
-- **`Strategy`** — shared behavior contract
-
-### Key Functions
-
-- `to_trit()`
-- `from_trit()`
-- `next()`
-- `new()`
-- `observe()`
-- `commit()`
-- `recall()`
-- `decay()`
-- `len()`
-- `is_empty()`
-- ... and 25 more
-
-## Why Ternary?
-
-The balanced ternary system {-1, 0, +1} (also known as Z₃) is the mathematically optimal discrete encoding:
-- **More expressive than binary**: three states capture positive, neutral, and negative
-- **Natural for decisions**: accept/reject/abstain, buy/hold/sell, agree/disagree/neutral
-- **Self-balancing**: the 0 state acts as a universal screen, preventing pathological lock-in
-- **Z₃ cyclic dynamics**: rock-paper-scissors is the only natural coordination mechanism
-
-## Stats
-
-| Metric | Value |
-|--------|-------|
-| Lines of Rust | 642 |
-| Test count | 23 |
-| Public types | 9 |
-| Public functions | 35 |
-
-## Ecosystem
-
-This crate is part of the **[SuperInstance Ternary Fleet](https://github.com/orgs/SuperInstance/repositories?q=ternary)**:
-
-- **[ternary-core](https://github.com/SuperInstance/ternary-core)** — shared traits and Z₃ arithmetic
-- **[ternary-grid](https://github.com/SuperInstance/ternary-grid)** — spatial grid with {-1, 0, +1} cells
-- **[ternary-graph](https://github.com/SuperInstance/ternary-graph)** — ternary-weighted graph algorithms
-- **[ternary-automata](https://github.com/SuperInstance/ternary-automata)** — three-state cellular automata
-- **[ternary-compiler](https://github.com/SuperInstance/ternary-compiler)** — expression compiler and optimizer
-
-200+ crates. 4,300+ tests. One pattern.
-
-## Research Context
-
-The ternary approach connects to several active research areas:
-- **Ternary Neural Networks** (TNNs): weights constrained to {-1, 0, +1} for efficient inference
-- **Huawei's ternary chip**: 7nm ternary silicon with 60% less power consumption
-- **Active inference**: free energy minimization naturally maps to ternary action selection
-- **Cyclic dominance**: RPS dynamics maintain biodiversity in spatial ecology
-- **Z₃ group theory**: the only algebraic group on three elements is cyclic addition mod 3
-
-## Usage
-
-```toml
-[dependencies]
-ternary-agent = "0.1.0"
 ```
+Avoid (-1) ──→ Explore (0) ──→ Choose (+1) ──→ Avoid (-1)
+```
+
+Each state has distinct semantics:
+- **Avoid** (-1): Agent rejects current option, retreats from threat
+- **Explore** (0): Agent gathers information without commitment
+- **Choose** (+1): Agent commits to a course of action
+
+The `next()` method cycles: Avoid → Explore → Choose → Avoid. State transitions: **O(1)**.
+
+### Agent Memory Model
+
+Memory is split into short-term and long-term stores:
+
+```
+MemoryEntry { key, value, strength: f64 }
+
+decay(clear_short_term, long_term_factor):
+  if clear_short_term: short_term.clear()
+  for entry in long_term: entry.strength *= long_term_factor
+```
+
+Short-term entries are O(1) to add, O(N) to clear. Long-term entries decay exponentially — strength approaches 0 as t → ∞ but never reaches it. Memory access: **O(N)** linear scan for key lookup.
+
+### Agent Pool Ranking
+
+The `AgentPool` tracks all agents with a `rank_by_fitness()` method:
+
+```
+rank_by_fitness() → Vec<(agent_id, fitness)>
+  sorted descending by fitness
+```
+
+Ranking: **O(N log N)** for N agents (sort by fitness). Pool membership: **O(1)** via HashMap.
+
+### Agent Communication
+
+`AgentCommunication` provides typed message passing:
+
+```
+send(from, to, message) → Result
+receive(agent_id) → Vec<Message>
+```
+
+Message routing: **O(1)** via HashMap of agent ID to mailbox.
+
+### Fitness
+
+Fitness is a simple `f64` score per agent, updated externally:
+
+```
+agent.fitness = evaluate_performance(agent)
+```
+
+Higher fitness = higher survival probability in evolutionary selection.
+
+## Quick Start
 
 ```rust
-use ternary_agent;
+use ternary_agent::{Agent, TernaryState, AgentPool};
+
+let mut agent = Agent::new("alpha", TernaryState::Explore);
+agent.memory.short_term.push(("observation".into(), "data".into(), 1.0));
+agent.fitness = 0.85;
+
+let mut pool = AgentPool::new();
+pool.add(agent);
+let ranked = pool.rank_by_fitness();
 ```
+
+## API
+
+| Type | Description |
+|------|-------------|
+| `TernaryState` | `Avoid (-1)`, `Explore (0)`, `Choose (+1)` with `to_trit()` and `next()` |
+| `Agent` | Identity, state, memory, fitness, generation tracking |
+| `AgentMemory` | Short-term (clearable) and long-term (decaying) stores |
+| `MemoryEntry` | key, value, strength triple |
+| `AgentPool` | Collection with `rank_by_fitness()` |
+| `AgentCommunication` | Message passing between agents |
+| `Fitness` | `f64` score type |
+
+## Architecture Notes
+
+Ternary Agent is the foundational type crate for the entire SuperInstance ternary ecosystem. In γ + η = C, the three states directly encode the equation: Choose (+1) = γ (growth), Avoid (-1) = η (avoidance), Explore (0) = neutral equilibrium state. Every other ternary crate builds on these types.
+
+See [ARCHITECTURE.md](https://github.com/SuperInstance/SuperInstance/blob/main/ARCHITECTURE.md) for the ternary agent architecture.
+
+## References
+
+1. Holland, J. H. (1992). *Adaptation in Natural and Artificial Systems*, 2nd ed. MIT Press.
+2. Russell, S. & Norvig, P. (2021). *AI: A Modern Approach*, 4th ed. Pearson. Chapter 2: Intelligent Agents.
+3. Knuth, D. E. (1981). *The Art of Computer Programming, Vol. 2*, 2nd ed. Section 4.1: Balanced Ternary Notation.
 
 ## License
 
