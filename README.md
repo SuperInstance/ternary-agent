@@ -1,110 +1,117 @@
 # Ternary Agent
 
-**Ternary Agent** provides the core agent types for the ternary ecosystem — every agent operates in one of three states (Avoid = -1, Explore = 0, Choose = +1), carrying memory, fitness scores, and behavioral metadata through an agent pool with fitness-based ranking.
+Core agent types for the **ternary ecosystem** — a framework where every agent operates in one of three states drawn from balanced ternary {-1, 0, +1}: **Avoid**, **Explore**, or **Choose**. Provides agent memory (short-term + long-term with decay), threshold-based strategies, fitness tracking, agent pools with ranking, and inter-agent message passing.
 
 ## Why It Matters
 
-Agent-based modeling frameworks need a foundational type that every higher-level system can build on. This crate defines that type: `Agent` with a `TernaryState` (Avoid/Explore/Choose), `AgentMemory` (short-term and long-term with decay), `Fitness` scoring, and an `AgentPool` with ranking. These three states map to the fundamental cognitive cycle: explore (gather information), choose (commit to an option), avoid (reject harmful options). This is the balanced ternary digit set {-1, 0, +1} applied to cognitive science.
+Agent frameworks typically model behavior as continuous-valued functions or finite state machines with dozens of states. The ternary approach constrains agents to exactly three behavioral modes, mapped to the balanced ternary digit set:
+
+| Trit | State | Semantics |
+|------|-------|-----------|
+| -1 | Avoid | Retreat, reject, diverge |
+| 0 | Explore | Gather information, remain neutral |
+| +1 | Choose | Commit, select, converge |
+
+This constraint is a feature, not a limitation. It forces crisp decision boundaries and enables population-level analysis: you can compute the **γ (signed charge)** of an entire agent pool with a single sum, and track how it evolves over time. The three-state model also maps directly to Z₃ cyclic dominance (rock-paper-scissors dynamics), which is the natural coordination mechanism for ternary multi-agent systems.
 
 ## How It Works
 
 ### Ternary State Machine
 
-```
-Avoid (-1) ──→ Explore (0) ──→ Choose (+1) ──→ Avoid (-1)
-```
+Each agent holds a `TernaryState` that cycles: Avoid → Explore → Choose → Avoid. The state is updated by a `Strategy` — a trait that takes the current state plus a numeric score and returns the next state:
 
-Each state has distinct semantics:
-- **Avoid** (-1): Agent rejects current option, retreats from threat
-- **Explore** (0): Agent gathers information without commitment
-- **Choose** (+1): Agent commits to a course of action
+$$s_{t+1} = \text{strategy}(s_t, \text{score}_t)$$
 
-The `next()` method cycles: Avoid → Explore → Choose → Avoid. State transitions: **O(1)**.
+The default `ThresholdStrategy` uses upper and lower bounds:
 
-### Agent Memory Model
+$$s_{t+1} = \begin{cases} \text{Choose} & \text{score} \geq \theta_{\text{upper}} \\ \text{Avoid} & \text{score} \leq \theta_{\text{lower}} \\ \text{Explore} & \text{otherwise} \end{cases}$$
 
-Memory is split into short-term and long-term stores:
+### Memory Model
 
-```
-MemoryEntry { key, value, strength: f64 }
+Agent memory has two tiers:
 
-decay(clear_short_term, long_term_factor):
-  if clear_short_term: short_term.clear()
-  for entry in long_term: entry.strength *= long_term_factor
-```
+- **Short-term**: recent observations with strength = 1.0, wiped on decay
+- **Long-term**: committed memories with exponential strength decay: $s_i(t) = s_i(0) \cdot \alpha^t$
 
-Short-term entries are O(1) to add, O(N) to clear. Long-term entries decay exponentially — strength approaches 0 as t → ∞ but never reaches it. Memory access: **O(N)** linear scan for key lookup.
+Memories below `min_strength` are pruned. This implements a **forgetting curve** consistent with Ebbinghaus-type memory models.
 
-### Agent Pool Ranking
+### Agent Pool Dynamics
 
-The `AgentPool` tracks all agents with a `rank_by_fitness()` method:
+The pool supports fitness-based ranking. At each tick:
 
-```
-rank_by_fitness() → Vec<(agent_id, fitness)>
-  sorted descending by fitness
-```
+$$\bar{f}(t) = \frac{1}{N} \sum_{i=1}^{N} f_i(t)$$
 
-Ranking: **O(N log N)** for N agents (sort by fitness). Pool membership: **O(1)** via HashMap.
+The ranked order enables selection, culling, and population-level health metrics.
 
-### Agent Communication
+### Message Bus
 
-`AgentCommunication` provides typed message passing:
+Inter-agent communication uses a simple inbox model: `send(msg)` pushes to a `HashMap<u64, Vec<AgentMessage>>`, and `receive(id)` drains the inbox. Broadcast sends to all recipients except the sender. This is O(1) per send, O(K) per receive where K = pending messages.
 
-```
-send(from, to, message) → Result
-receive(agent_id) → Vec<Message>
-```
+### Complexity
 
-Message routing: **O(1)** via HashMap of agent ID to mailbox.
-
-### Fitness
-
-Fitness is a simple `f64` score per agent, updated externally:
-
-```
-agent.fitness = evaluate_performance(agent)
-```
-
-Higher fitness = higher survival probability in evolutionary selection.
+| Operation | Time |
+|-----------|------|
+| `Agent::tick(score)` | O(1) + strategy cost |
+| `AgentMemory::observe` | O(1) amortized |
+| `AgentMemory::recall(key)` | O(S + L) where S = short-term, L = long-term |
+| `AgentMemory::decay` | O(L) |
+| `AgentPool::tick_all(score)` | O(N) |
+| `AgentPool::ranked()` | O(N log N) |
+| `AgentCommunication::send(msg)` | O(1) amortized |
 
 ## Quick Start
 
 ```rust
-use ternary_agent::{Agent, TernaryState, AgentPool};
+use ternary_agent::{Agent, AgentPool, ThresholdStrategy, AgentBehavior, TernaryState};
 
-let mut agent = Agent::new("alpha", TernaryState::Explore);
-agent.memory.short_term.push(("observation".into(), "data".into(), 1.0));
-agent.fitness = 0.85;
+// Create an agent with threshold behavior
+let strategy = ThresholdStrategy::new(-0.5, 0.5);
+let behavior = AgentBehavior::new("threshold", Box::new(strategy));
+let mut agent = Agent::new(1).with_behavior(behavior);
 
+agent.observe("food", "left");
+agent.tick(0.8);  // score > upper threshold → Choose
+assert_eq!(agent.state, TernaryState::Choose);
+
+// Pool with ranking
 let mut pool = AgentPool::new();
-pool.add(agent);
-let ranked = pool.rank_by_fitness();
+pool.add(Agent::new(1));
+pool.add(Agent::new(2));
+pool.tick_all(0.5);
+let best_first: Vec<u64> = pool.ranked();
 ```
 
 ## API
 
+### Core Types
+
 | Type | Description |
 |------|-------------|
-| `TernaryState` | `Avoid (-1)`, `Explore (0)`, `Choose (+1)` with `to_trit()` and `next()` |
-| `Agent` | Identity, state, memory, fitness, generation tracking |
-| `AgentMemory` | Short-term (clearable) and long-term (decaying) stores |
-| `MemoryEntry` | key, value, strength triple |
-| `AgentPool` | Collection with `rank_by_fitness()` |
-| `AgentCommunication` | Message passing between agents |
-| `Fitness` | `f64` score type |
+| `TernaryState` | Enum: Avoid (-1), Explore (0), Choose (+1) |
+| `Agent` | Core agent: id, state, fitness, memory, behavior |
+| `AgentMemory` | Short-term + long-term memory with decay |
+| `AgentPool` | Collection with fitness ranking |
+| `AgentCommunication` | Message bus for inter-agent messaging |
+| `Strategy` (trait) | `decide(current_state, score) → TernaryState` |
+| `ThresholdStrategy` | Concrete strategy with upper/lower thresholds |
+| `AgentBehavior` | Wraps a Strategy with decision counting |
 
 ## Architecture Notes
 
-Ternary Agent is the foundational type crate for the entire SuperInstance ternary ecosystem. In γ + η = C, the three states directly encode the equation: Choose (+1) = γ (growth), Avoid (-1) = η (avoidance), Explore (0) = neutral equilibrium state. Every other ternary crate builds on these types.
+The agent system is built around the **γ + η = C** conservation principle:
 
-See [ARCHITECTURE.md](https://github.com/SuperInstance/SuperInstance/blob/main/ARCHITECTURE.md) for the ternary agent architecture.
+- **γ (structure)**: the agent pool topology — who exists, their IDs, their strategy assignments
+- **η (dynamics)**: the stream of scores, messages, and observations that perturb agent states
+- **C (conservation)**: the invariants — total agent count (no loss), fitness bounds, message delivery guarantees
+
+The ternary state space (|S| = 3) ensures that population-level statistics are always meaningful: with N agents, the macro-state is fully described by $(n_{-1}, n_0, n_{+1})$ where $n_{-1} + n_0 + n_{+1} = N$. The signed charge $\gamma = n_{+1} - n_{-1}$ is a sufficient statistic for population mood.
 
 ## References
 
-1. Holland, J. H. (1992). *Adaptation in Natural and Artificial Systems*, 2nd ed. MIT Press.
-2. Russell, S. & Norvig, P. (2021). *AI: A Modern Approach*, 4th ed. Pearson. Chapter 2: Intelligent Agents.
-3. Knuth, D. E. (1981). *The Art of Computer Programming, Vol. 2*, 2nd ed. Section 4.1: Balanced Ternary Notation.
+- Russell, S. & Norvig, P. (2020). *Artificial Intelligence: A Modern Approach* (4th ed.). — Agent taxonomy.
+- Wooldridge, M. (2009). *An Introduction to MultiAgent Systems* (2nd ed.). Wiley.
+- Brusentsov, N.P. (1958). *Ternary Computers* — Setun system and balanced ternary.
+- Ebbinghaus, H. (1885). *Memory: A Contribution to Experimental Psychology*. — Forgetting curves.
+- Nowak, M. (2006). *Evolutionary Dynamics*. Harvard — Z₃ cyclic dominance in evolutionary game theory.
 
-## License
-
-MIT
+## License: MIT
